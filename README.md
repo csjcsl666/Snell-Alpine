@@ -28,7 +28,6 @@ Alpine
 - Alpine 官方的 `gcompat` 提供 glibc 加载器与 libc 兼容层，`libstdc++` 与 `libgcc` 提供 C++ 运行库
 - 只装 `gcompat` 不够，会报 `Error loading shared library libstdc++.so.6`，脚本会同时安装这三个包
 
-对小内存 NAT VPS 来说，这比再叠一层容器运行时轻得多
 
 ## 不使用 Docker
 
