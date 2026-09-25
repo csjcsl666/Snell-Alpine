@@ -1,10 +1,21 @@
 #!/bin/sh
-# Snell v6 installer and manager for Alpine Linux (musl + gcompat + OpenRC, no Docker)
+# Snell-Alpine
+# Alpine Linux 原生 Snell v6 安装与管理脚本 (musl + gcompat + OpenRC, 无 Docker)
 #
-# Menu design and management flow are inspired by https://github.com/passeway/Snell (AGPL-3.0)
+# 管理菜单, 交互设计及部分实现思路参考:
+# https://github.com/passeway/Snell
+# Original project: passeway/Snell
+# License: AGPL-3.0
+#
+# 菜单结构与文案, 服务器配置模板及客户端示例格式沿用原项目, 脚本代码针对 Alpine 重新编写
+# Menu layout and wording, the server config template and the client example format follow
+# the original project; the script code itself is rewritten for Alpine Linux
+#
+# Snell 是 Surge 团队开发的代理协议, 本脚本为第三方非官方脚本
 # Snell is a proxy protocol by the Surge team; this is an unofficial third-party script
+#
 # Copyright (C) 2026 csjcsl666
-# Licensed under AGPL-3.0, see LICENSE
+# This project is licensed under AGPL-3.0, see LICENSE
 
 set -u
 

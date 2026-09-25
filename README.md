@@ -4,6 +4,8 @@
 
 Snell 是 Surge 团队开发的代理协议，本项目仅为第三方 Alpine Linux 安装管理脚本，与 Surge / Snell 官方无关
 
+管理菜单与交互设计参考自 [passeway/Snell](https://github.com/passeway/Snell)，详见 [项目来源与致谢](#项目来源与致谢)
+
 ## 这是什么
 
 一个纯 POSIX sh（BusyBox ash 兼容）脚本，在 Alpine 上完成 Snell v6 服务端的安装，更新，启停，卸载与查看配置
@@ -217,9 +219,33 @@ Snell 是 Surge 团队开发的代理协议，本项目仅为第三方 Alpine Li
 
 脚本不托管，不重新打包，不编译 Snell，二进制只从官方下载地址获取，官方文档也说明 Snell 为追求性能而做了取舍，例如没有前向保密与专门的重放保护，请阅读 [官方文档](https://kb.nssurge.com/surge-knowledge-base/release-notes/snell) 后自行评估
 
-## 致谢
+## 项目来源与致谢
 
-菜单与部分实现思路参考 [passeway/Snell](https://github.com/passeway/Snell)，该项目使用 AGPL-3.0 许可证，感谢原作者
+本项目的 Snell 管理菜单，交互设计及部分实现思路参考了 [passeway/Snell](https://github.com/passeway/Snell)
+
+参考并沿用的部分
+
+- 菜单的整体结构与选项文案，包括 安装，卸载，启动或停止，更新，重启，查看状态，日志，配置，退出，以及顶部的安装状态，运行状态，运行版本显示
+- 服务器配置文件的字段组织，以及 Surge 客户端示例的格式
+- 安装，更新，卸载的整体管理流程
+
+代码复用情况
+
+- 本项目没有直接复制原项目的代码块，脚本代码是针对 Alpine Linux 重新编写的
+- 菜单文案与配置模板沿用了原项目，因此在此明确标注来源，请不要理解为整个项目完全从零设计
+
+许可证
+
+- 原项目采用 AGPL-3.0 License，本项目同样采用 AGPL-3.0 License，并在 README 与脚本头部保留来源与许可证声明
+
+在此基础上本项目针对 Alpine Linux 重新实现和适配，主要包括
+
+- gcompat 运行环境，同时处理 libstdc++ 与 libgcc 依赖
+- OpenRC 服务管理，使用 supervise-daemon 与降权运行的 `snell` 用户
+- Alpine 版本检测与已确认兼容范围管理
+- 无需 Docker 的原生 Snell 部署流程，含 CPU 架构严格识别，下载后试运行，安装后 LISTEN 验证，更新失败自动回滚
+
+本项目与 passeway/Snell 的作者没有隶属关系，也未获得其背书，感谢原作者
 
 ## License
 
