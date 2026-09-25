@@ -19,7 +19,18 @@
 
 set -u
 
-SCRIPT_VERSION="1.0.0"
+SCRIPT_VERSION="1.1.0"
+
+# ---------------------------------------------------------------------------
+# 管理命令自身
+# ---------------------------------------------------------------------------
+# 本脚本安装后的位置, 以后直接输入 snell 进入菜单 (与二进制 snell-server 不同名)
+SELF_PATH="/usr/local/bin/snell"
+# 管理脚本的下载地址, 可用环境变量 SNELL_ALPINE_SCRIPT_URL 指向镜像
+SCRIPT_URL="${SNELL_ALPINE_SCRIPT_URL:-https://raw.githubusercontent.com/csjcsl666/Snell-Alpine/main/snell-alpine.sh}"
+# 下面这一行是完整性校验用的标记, 不要修改
+# shellcheck disable=SC2034
+SNELL_ALPINE_SCRIPT=1
 
 # ---------------------------------------------------------------------------
 # 兼容范围
@@ -109,7 +120,7 @@ make_work_dir() {
 safe_rm() {
     for _p in "$@"; do
         case "$_p" in
-            "$BIN_FILE" | "$BIN_FILE.bak" | "$BIN_FILE.new" | "$INIT_FILE" | "$CONF_DIR" | "$LOG_FILE" | "$LOG_FILE.1")
+            "$BIN_FILE" | "$BIN_FILE.bak" | "$BIN_FILE.new" | "$INIT_FILE" | "$CONF_DIR" | "$LOG_FILE" | "$LOG_FILE.1" | "$SELF_PATH" | "$SELF_PATH.new")
                 rm -rf -- "$_p"
                 ;;
             *)
@@ -638,6 +649,8 @@ print_summary() {
     say "服务器配置: $CONF_FILE"
     say "客户端示例 (Surge):"
     [ -f "$CLIENT_CONF_FILE" ] && cat "$CLIENT_CONF_FILE"
+    say ""
+    say "以后输入 snell 即可打开管理菜单"
 }
 
 # ---------------------------------------------------------------------------
@@ -785,6 +798,117 @@ do_uninstall() {
     ok "Snell 已卸载"
     say "未移除依赖包 ($RUNTIME_PKGS), 它们可能被其他程序使用"
     say "确认不再需要时可自行执行: apk del $RUNTIME_PKGS"
+    say "管理命令 snell 已保留, 可随时重新安装; 如需一并删除请执行: snell self-uninstall"
+}
+
+# ---------------------------------------------------------------------------
+# 功能: 管理命令自身的安装 / 更新 / 删除
+# ---------------------------------------------------------------------------
+# 完整性校验: 标记行存在, 末行是入口 (排除下载不完整), 语法正确
+valid_script() {
+    grep -qx 'SNELL_ALPINE_SCRIPT=1' "$1" 2> /dev/null \
+        && [ "$(tail -n 1 "$1")" = 'main "$@"' ] \
+        && sh -n "$1" 2> /dev/null
+}
+
+script_version_of() { sed -n 's/^SCRIPT_VERSION="\(.*\)"$/\1/p' "$1" | head -n1; }
+
+# 下载管理脚本到 $WORK_DIR/snell.sh 并校验, 失败时不改动任何文件
+fetch_script() {
+    make_work_dir || return 1
+    say "获取管理脚本: $SCRIPT_URL"
+    wget -q -T 30 -O "$WORK_DIR/snell.sh" "$SCRIPT_URL" || {
+        err "下载管理脚本失败: $SCRIPT_URL"
+        return 1
+    }
+    valid_script "$WORK_DIR/snell.sh" || {
+        err "下载的管理脚本不完整或无效, 未做任何修改"
+        return 1
+    }
+}
+
+# 用法: install_self 已校验的脚本文件 ; 先写临时文件再 mv 原子替换, 不影响正在运行的旧脚本
+install_self() {
+    _new_ver=$(script_version_of "$1")
+    if [ -f "$SELF_PATH" ] && cmp -s "$1" "$SELF_PATH"; then
+        say "管理命令 $SELF_PATH 已是最新 ($_new_ver)"
+        return 0
+    fi
+    _old_ver=""
+    [ -f "$SELF_PATH" ] && _old_ver=$(script_version_of "$SELF_PATH")
+    if ! { install -m 0755 -o root -g root "$1" "$SELF_PATH.new" && mv -f "$SELF_PATH.new" "$SELF_PATH"; }; then
+        err "写入 $SELF_PATH 失败"
+        safe_rm "$SELF_PATH.new"
+        return 1
+    fi
+    if [ -n "$_old_ver" ]; then
+        ok "管理命令已更新: ${_old_ver} -> ${_new_ver}"
+    else
+        ok "管理命令已安装: $SELF_PATH ($_new_ver)"
+    fi
+}
+
+# 不是以 $SELF_PATH 运行时 (管道执行或临时下载的文件), 先把脚本安装为 snell 命令, 再交给本地命令执行
+bootstrap() {
+    _self=$(readlink -f "$0" 2> /dev/null) || _self=""
+    [ "$_self" = "$SELF_PATH" ] && return 0
+
+    if [ -f "$_self" ] && grep -qx 'SNELL_ALPINE_SCRIPT=1' "$_self" 2> /dev/null; then
+        # 以本地文件运行: 安装的就是这份文件, 不需要联网; 与已装命令相同时直接转交, 不重复提示
+        valid_script "$_self" || {
+            err "脚本文件 $_self 不完整或有语法错误, 请重新下载"
+            exit 1
+        }
+        if ! { [ -f "$SELF_PATH" ] && cmp -s "$_self" "$SELF_PATH"; }; then
+            install_self "$_self" || exit 1
+            say "以后输入 snell 即可打开管理菜单"
+            say ""
+        fi
+    else
+        # 管道执行 (wget -qO- URL | sh): 拿不到自身内容, 重新下载一份完整的再安装
+        fetch_script || exit 1
+        install_self "$WORK_DIR/snell.sh" || exit 1
+        cleanup
+        say "以后输入 snell 即可打开管理菜单"
+        say ""
+    fi
+
+    # exec 不会触发 EXIT trap, 上面已手动清理临时文件
+    if [ -t 0 ]; then
+        exec "$SELF_PATH" "$@"
+    fi
+    # 管道执行时标准输入是脚本本身, 改从终端读取菜单输入
+    if (: < /dev/tty) 2> /dev/null; then
+        exec "$SELF_PATH" "$@" < /dev/tty
+    fi
+    if [ "$#" -gt 0 ]; then
+        exec "$SELF_PATH" "$@" < /dev/null
+    fi
+    say "当前没有可交互的终端, 请在终端中输入 snell 打开管理菜单"
+    exit 0
+}
+
+do_self_update() {
+    fetch_script || return 1
+    if cmp -s "$WORK_DIR/snell.sh" "$SELF_PATH"; then
+        ok "管理脚本已是最新 ($SCRIPT_VERSION), 无需更新"
+        return 2
+    fi
+    install_self "$WORK_DIR/snell.sh" || return 1
+    say "只更新了管理脚本, Snell Server 未改动 (更新 Snell 请使用: snell update)"
+}
+
+do_self_uninstall() {
+    if snell_installed; then
+        err "Snell 仍处于安装状态, 请先执行 snell uninstall, 再删除管理命令"
+        return 1
+    fi
+    confirm "将删除管理命令 $SELF_PATH, 确认" || {
+        say "已取消"
+        return 1
+    }
+    safe_rm "$SELF_PATH" || return 1
+    ok "管理命令已删除, 需要时重新执行安装命令即可"
 }
 
 # ---------------------------------------------------------------------------
@@ -898,6 +1022,7 @@ show_menu() {
     say "Snell 安装状态: $_inst"
     say "Snell 运行状态: $_run"
     say "Snell 运行版本: $_ver"
+    say "管理脚本版本: $SCRIPT_VERSION"
     say ""
     say "1. 安装 Snell 服务"
     say "2. 卸载 Snell 服务"
@@ -907,6 +1032,7 @@ show_menu() {
     say "6. 查看 Snell 状态"
     say "7. 查看 Snell 日志"
     say "8. 查看 Snell 配置"
+    say "9. 更新管理脚本"
     say "0. 退出"
     ok "============================="
     printf '请输入选项编号: '
@@ -929,6 +1055,14 @@ run_menu() {
             6) do_status ;;
             7) do_log ;;
             8) do_config ;;
+            9)
+                if do_self_update; then
+                    pause_menu
+                    # 用新版本脚本重新打开菜单
+                    cleanup
+                    exec "$SELF_PATH"
+                fi
+                ;;
             0)
                 ok "已退出 Snell Alpine 管理工具"
                 exit 0
@@ -943,19 +1077,21 @@ usage() {
     cat << EOF
 Snell Alpine 管理工具 $SCRIPT_VERSION
 
-用法: $0 [命令]
+用法: snell [命令]
 
 命令:
-  (无)       进入交互菜单
-  install    安装 Snell
-  uninstall  卸载 Snell
-  start      启动服务
-  stop       停止服务
-  restart    重启服务
-  update     更新 Snell
-  status     查看状态
-  log        查看日志
-  config     查看配置
+  (无)            进入交互菜单
+  install         安装 Snell
+  uninstall       卸载 Snell (保留 snell 管理命令)
+  start           启动服务
+  stop            停止服务
+  restart         重启服务
+  update          更新 Snell Server
+  status          查看状态
+  log             查看日志
+  config          查看配置
+  self-update     更新管理脚本 (不影响 Snell Server)
+  self-uninstall  删除 snell 管理命令 (需先卸载 Snell)
 
 环境变量:
   SNELL_PORT=端口          安装时指定监听端口 (默认随机)
@@ -978,6 +1114,7 @@ main() {
     check_root || exit 1
     check_alpine || exit 1
     detect_arch || exit 1
+    bootstrap "$@"
     check_alpine_range || exit 1
 
     case "${1:-}" in
@@ -996,6 +1133,11 @@ main() {
         status) do_status ;;
         log) do_log ;;
         config) do_config ;;
+        self-update)
+            do_self_update
+            [ "$?" -ne 1 ]
+            ;;
+        self-uninstall) do_self_uninstall ;;
         *)
             usage
             exit 1

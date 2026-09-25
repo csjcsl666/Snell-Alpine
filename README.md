@@ -6,6 +6,26 @@ Snell 是 Surge 团队开发的代理协议，本项目仅为第三方 Alpine Li
 
 管理菜单与交互设计参考自 [passeway/Snell](https://github.com/passeway/Snell)，详见 [项目来源与致谢](#项目来源与致谢)
 
+## 快速开始
+
+以 root 在 Alpine 上执行
+
+安装
+
+```sh
+wget -qO- https://raw.githubusercontent.com/csjcsl666/Snell-Alpine/main/snell-alpine.sh | sh
+```
+
+管理
+
+```sh
+snell
+```
+
+安装命令会把管理脚本装为 `/usr/local/bin/snell` 并打开菜单，在菜单里选 1 安装 Snell
+
+以后任何时候输入 `snell` 即可回到菜单，日常管理使用本地命令，不需要再联网
+
 ## 这是什么
 
 一个纯 POSIX sh（BusyBox ash 兼容）脚本，在 Alpine 上完成 Snell v6 服务端的安装，更新，启停，卸载与查看配置
@@ -61,24 +81,47 @@ Alpine
 
 其他架构（如 armv7，armhf，riscv64，ppc64le，s390x）官方 v6 没有 Server 二进制，脚本会直接提示无法安装，不使用 QEMU，box64 等兼容方案
 
-## 安装方法
+## 安装入口说明
 
-以 root 运行
+推荐方式就是 [快速开始](#快速开始) 里的那一条命令，下面是它的工作方式和其他用法
+
+安装命令做的事情
+
+1. 检查 root，Alpine，OpenRC 与 CPU 架构，不满足时直接退出，不写入任何文件
+2. 管道执行时拿不到脚本自身内容，所以重新下载一份完整脚本到临时目录
+3. 校验下载内容 标记行存在，末行是入口，`sh -n` 语法检查通过，下载不完整时不做任何修改
+4. 写入 `/usr/local/bin/snell`，先写临时文件再原子替换
+5. 转交给本地的 `snell` 执行，菜单从终端读取输入
+
+设计取舍
+
+- 只依赖 Alpine 自带的 BusyBox wget，不需要 curl 或 bash
+- 管理命令叫 `snell`，二进制叫 `snell-server`，OpenRC 服务在 `/etc/init.d/snell`，三者互不冲突
+- `/usr/local/bin` 在 Alpine root 登录 shell 的默认 PATH 中，装好后当前会话就能直接用
+- 联网只发生在首次安装，更新 Snell，更新管理脚本这三个时刻，平时运行的一直是本地脚本
+- 脚本的所有逻辑都在函数里，最后一行才调用入口，所以下载中断时不会执行半截脚本
+- BusyBox wget 即使加了 `-q` 也会打印下载失败的原因，例如 `bad address` 或 `404`
+
+重复执行安装命令
+
+- 会把 `snell` 更新到仓库中的最新版本，内容相同时提示已是最新，然后打开菜单
+- 不会重装或改动 Snell Server，配置，端口和 PSK 都保持原样
+
+其他用法
 
 ```sh
+# 先下载再执行，可以先检查脚本内容，适合离线或手动分发
 wget -O snell-alpine.sh https://raw.githubusercontent.com/csjcsl666/Snell-Alpine/main/snell-alpine.sh
-chmod +x snell-alpine.sh
-./snell-alpine.sh
+sh snell-alpine.sh
+
+# 无人值守安装，例如写在 cloud-init 里
+wget -qO- https://raw.githubusercontent.com/csjcsl666/Snell-Alpine/main/snell-alpine.sh | SNELL_PORT=20000 sh -s -- install
+
+# raw.githubusercontent.com 无法访问时改用镜像地址，之后执行 snell self-update 时也要带上同样的变量
+wget -qO- <镜像地址> | SNELL_ALPINE_SCRIPT_URL=<镜像地址> sh
 ```
 
-Alpine 自带 BusyBox wget 与 unzip，无需额外安装下载工具
-
-也可以直接使用子命令，适合自动化
-
-```sh
-./snell-alpine.sh install
-./snell-alpine.sh status
-```
+以本地文件运行时，安装的就是这份文件本身，不需要联网
 
 ## 菜单功能
 
@@ -90,6 +133,7 @@ CPU 架构: x86_64 (Snell: amd64)
 Snell 安装状态: 已安装
 Snell 运行状态: 运行中
 Snell 运行版本: v6.0.0rc2
+管理脚本版本: 1.1.0
 
 1. 安装 Snell 服务
 2. 卸载 Snell 服务
@@ -99,21 +143,26 @@ Snell 运行版本: v6.0.0rc2
 6. 查看 Snell 状态
 7. 查看 Snell 日志
 8. 查看 Snell 配置
+9. 更新管理脚本
 0. 退出
 ```
 
 第 3 项会根据运行状态在 启动 与 停止 之间切换
 
-子命令与环境变量
+子命令与环境变量，适合脚本调用，`snell --help` 可查看同样的内容
 
 | 子命令 | 说明 |
 | --- | --- |
-| install uninstall update | 安装，卸载，更新 |
-| start stop restart | 服务控制 |
-| status log config | 状态，日志，配置 |
+| `snell install` `snell uninstall` | 安装，卸载 Snell |
+| `snell start` `snell stop` `snell restart` | 服务控制 |
+| `snell status` `snell log` `snell config` | 状态，日志，配置 |
+| `snell update` | 更新 Snell Server |
+| `snell self-update` | 更新管理脚本，不影响 Snell Server |
+| `snell self-uninstall` | 删除 `snell` 管理命令，需先卸载 Snell |
 
 | 环境变量 | 说明 |
 | --- | --- |
+| `SNELL_ALPINE_SCRIPT_URL=地址` | 管理脚本的下载地址，用于镜像 |
 | `SNELL_PORT=端口` | 安装时指定监听端口，默认随机 |
 | `SNELL_IPV6=1` | 安装时同时监听 IPv6 |
 | `SNELL_VERSION=v6.x.y` | 指定 Snell 版本，默认自动获取最新 v6 |
@@ -137,6 +186,7 @@ Snell 官方没有提供 latest 接口，脚本从官方文档页面解析当前
 
 | 用途 | 路径 |
 | --- | --- |
+| 管理命令 | `/usr/local/bin/snell` |
 | 二进制 | `/usr/local/bin/snell-server` |
 | 服务器配置 | `/etc/snell/snell-server.conf` |
 | 客户端示例 | `/etc/snell/snell-client.conf` |
@@ -169,7 +219,9 @@ tail -f /var/log/snell.log
 
 ## 更新
 
-菜单选 4 或执行 `./snell-alpine.sh update`
+Snell Server 与管理脚本分开更新，互不影响，都不会自动执行，只在你手动触发时联网
+
+更新 Snell Server，菜单选 4 或执行 `snell update`
 
 1. 比较已装版本与目标版本，相同则提示无需更新
 2. 下载到临时目录，检查压缩包，解压，试运行新二进制
@@ -177,13 +229,29 @@ tail -f /var/log/snell.log
 4. 停止服务，备份旧二进制，替换，启动并验证
 5. 新版本启动失败时自动回滚到旧版本并重新启动
 
+更新管理脚本，菜单选 9 或执行 `snell self-update`
+
+1. 下载仓库中的最新脚本到临时目录并做完整性校验，校验失败不做任何修改
+2. 与本地 `snell` 内容相同时提示无需更新
+3. 原子替换 `/usr/local/bin/snell`，在菜单中更新后会用新版本重新打开菜单
+
+重新执行安装命令与 `snell self-update` 效果相同
+
 ## 卸载
 
-菜单选 2 或执行 `./snell-alpine.sh uninstall`
+卸载 Snell，菜单选 2 或执行 `snell uninstall`
 
 只删除本项目创建的内容 二进制，`/etc/snell`，`/etc/init.d/snell`，日志，OpenRC 注册，以及脚本自己创建的 `snell` 用户
 
 不会删除 `gcompat libstdc++ libgcc`，它们可能被其他程序使用，确认不需要时可手动 `apk del`，也不会修改网络，防火墙，SSH 与其他代理程序
+
+卸载 Snell 后 `snell` 管理命令会保留，方便以后重新安装，如果连管理命令也不要了
+
+```sh
+snell self-uninstall
+```
+
+它只删除 `/usr/local/bin/snell`，Snell 仍在安装状态时会拒绝执行，避免留下无人管理的服务
 
 ## NAT VPS 注意事项
 
@@ -202,6 +270,8 @@ tail -f /var/log/snell.log
 | 沙盒运行验证 | 使用 Alpine 官方 minirootfs 在非特权用户命名空间 chroot 中，无 Docker，运行完整流程 安装，状态，重启，启停，更新，回滚，卸载 |
 
 沙盒运行验证覆盖 Alpine 3.21.8，3.22.6，3.23.6，3.24.2 的 x86_64，以及 3.24.2 的 x86，均使用真实 OpenRC 与真实的 Surge 官方二进制
+
+安装入口在 Alpine 3.24.2 x86_64 沙盒中另外验证了 管道安装后打开菜单，离线运行 `snell` 与子命令，重复执行安装命令，自更新，自更新遇到截断文件或 404 时保持原样，无终端时的管道执行，本地文件方式，非 root 拒绝，卸载后保留管理命令，`self-uninstall`
 
 需要明确的局限
 
